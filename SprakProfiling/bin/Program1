@@ -1,9 +1,0 @@
-
-loop from 1 to 3
-    loop x from 1 to 5
-        print(x)
-        if x == 4
-            break
-        end
-    end
-end

@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- Updated and new lines -->
+    <Authors>Erik Svedäng, Johannes Gotlén</Authors>
+    <Company></Company> <!-- You can leave this blank -->
+    <Description>A simple programming language made with simplicity and low learning curve in mind. Made by Erik Svedäng.</Description>
+    <Copyright>Copyright (c) 2012 Erik Svedäng, Johannes Gotlén</Copyright>
+    
+    <!-- This is the standard way to declare the license -->
+    <PackageLicenseExpression>Zlib</PackageLicenseExpression>
+
+    <NoWarn>$(NoWarn);CS8618;CS8600;CS8602;CS8603;CS8604;CS8625;CS8601;CS8765;CS8605;CS0168;CA2200</NoWarn>
+
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NUnit" Version="4.3.2" />
+  </ItemGroup>
+
+</Project>
