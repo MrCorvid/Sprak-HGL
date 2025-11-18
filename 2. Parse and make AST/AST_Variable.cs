@@ -13,5 +13,10 @@ namespace ProgrammingLanguageNr1
         {
             return "var:" + getTokenString();
         }
+
+		public override AST Clone()
+		{
+			return (AST_Variable)base.Clone();
+		}
     }
 }

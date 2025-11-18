@@ -23,5 +23,10 @@ namespace ProgrammingLanguageNr1
         {
             return "Assign to " + m_variableName + "";
         }
+
+		public override AST Clone()
+		{
+			return (AST_Assignment)base.Clone();
+		}
     }
 }

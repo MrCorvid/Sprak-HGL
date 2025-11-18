@@ -3,11 +3,12 @@
 //#define WRITE_CONVERT_INFO
 #define LOG_SCOPES
 
-//#define BUILT_IN_PROFILING
+#define BUILT_IN_PROFILING
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text;
 
 namespace ProgrammingLanguageNr1
 {
@@ -20,6 +21,13 @@ namespace ProgrammingLanguageNr1
         }
 
 		public static int nrOfInterpreters = 0;
+
+        public Action<string>? OnTrace;
+
+        private void Trace(Func<string> messageBuilder)
+        {
+            OnTrace?.Invoke(messageBuilder());
+        }
 
 		public InterpreterTwo(AST ast, Scope globalScope, ErrorHandler errorHandler, ExternalFunctionCreator externalFunctionCreator)
         {
@@ -65,17 +73,16 @@ namespace ProgrammingLanguageNr1
 			}
 
 			m_valueStack.Clear();
+			m_memorySpaceStack.Clear ();
+            
+			m_memorySpaceNodeListCache.clear();
 
 			m_globalMemorySpace = new MemorySpace("globals", m_ast.getChild (0), m_globalScope, m_memorySpaceNodeListCache);
 			m_currentMemorySpace = m_globalMemorySpace;
 
-			m_memorySpaceStack.Clear ();
-
 			m_currentScope = m_globalScope;
 			m_currentScope.ClearMemorySpaces();
 			m_currentScope.PushMemorySpace(m_currentMemorySpace);
-
-			m_memorySpaceNodeListCache.clear();
 
 			m_topLevelDepth = 0;
         }
@@ -107,14 +114,11 @@ namespace ProgrammingLanguageNr1
 
             m_currentScope = newScope;
             m_memorySpaceStack.Push(m_currentMemorySpace);
-
+            
             m_currentMemorySpace = new MemorySpace(nameOfNewMemorySpace, startNode, m_currentScope, m_memorySpaceNodeListCache);
 			m_currentScope.PushMemorySpace(m_currentMemorySpace);
 
 #if LOG_SCOPES
-			//m_currentMemorySpace.TraceParentScopes();
-			//Console.WriteLine("Pushed new scope " + newScope.getName() + " with memory space " + m_currentMemorySpace.getName() + ", stack: " + DumpStack());
-			//Console.WriteLine("CREATED " + m_currentMemorySpace.getName());
 			nrOfScopes++;
 #endif
         }
@@ -123,27 +127,17 @@ namespace ProgrammingLanguageNr1
 
         private void PopCurrentScope()
         {
-#if LOG_SCOPES
-//			Console.WriteLine("Popping " + m_currentScope.getName() + ", memory spaces: ");
-//			foreach(var mem in m_currentScope.memorySpaces) {
-//				Console.WriteLine(mem.getName());
-//			}
-#endif
-
-			var oldScope = m_currentScope;
             var poppedMemorySpace = m_currentScope.PopMemorySpace();
 
             m_currentMemorySpace = m_memorySpaceStack.Pop();
             m_currentScope = m_currentMemorySpace.Scope;
             m_currentScope.PushMemorySpace(m_currentMemorySpace);
 #if LOG_SCOPES
-			//Console.WriteLine("Popped back to scope " + m_currentScope.getName() + " from " + oldScope + ", popped " + poppedMemorySpace.getName()  + ", stack: " + DumpStack());
-			//Console.WriteLine("POPPED " + poppedMemorySpace.getName());
 			nrOfScopes--;
 #endif
         }
 
-        private void PrintValueStack()
+        public void PrintValueStack()
         {
             Console.Write("VALUE_STACK: ");
             foreach (object rv in m_valueStack)
@@ -187,16 +181,9 @@ namespace ProgrammingLanguageNr1
 			NORMAL_FUNCTION,
 		};
 
-		/// <summary>
-		/// Sets the program to execute function.
-		/// Returns true if the program had the function.
-		/// </summary>
 		public ProgramFunctionCallStatus SetProgramToExecuteFunction (string functionName, object[] args)
 		{
-			//Console.WriteLine ("Will execute '" + functionName + "' in global scope '" + m_globalScope + "'");
-
 			FunctionSymbol functionSymbol = (FunctionSymbol)m_globalScope.resolve(functionName);
-			//Console.WriteLine("Found function symbol: " + functionSymbol.ToString());
 
 			if(functionSymbol == null) {
 				return ProgramFunctionCallStatus.NO_FUNCTION;
@@ -231,14 +218,12 @@ namespace ProgrammingLanguageNr1
 						object convertedValue = ReturnValueConversions.ChangeTypeBasedOnReturnValueType(args[i], declaration.Type);
 						PushValue(convertedValue); // reverse order
 					}
-
-					//Console.WriteLine ("Ready to start running function '" + functionName + "' with memory space '" + nameOfNewMemorySpace + "'");
 				} else {
 					throw new Error(functionName + " has got no function definition node!");
 				}
 			}
 
-			return ProgramFunctionCallStatus.NORMAL_FUNCTION; // all went well (starting the function)
+			return ProgramFunctionCallStatus.NORMAL_FUNCTION;
 		}
 			
 		public object GetGlobalVariableValue(string pName) 
@@ -253,12 +238,8 @@ namespace ProgrammingLanguageNr1
 
             while (!m_currentMemorySpace.Next())
             {
-                //Console.WriteLine(m_currentMemorySpace.getName() + " is out of statements to execute.");
-				//Console.WriteLine (DumpStack ());
-
 				if (m_memorySpaceStack.Count == m_topLevelDepth)
                 {
-                    //Console.WriteLine("Stack is empty, finishing execution.");
                     return false;
                 }
                 else
@@ -291,12 +272,22 @@ namespace ProgrammingLanguageNr1
 			
             switch (CurrentNode.getTokenType())
             {
+                case Token.TokenType.LABEL:
+                    // A label is a destination for a GOTO. No action is needed when executing it sequentially.
+                    break;
+
+                case Token.TokenType.GOTO:
+                    string labelName = CurrentNode.getTokenString();
+                    m_currentMemorySpace.JumpToLabel(labelName);
+                    break;
+                
+                case Token.TokenType.IF_GOTO:
+                    HandleIfGoto();
+                    break;
 
                 case Token.TokenType.STATEMENT_LIST:
                 case Token.TokenType.NODE_GROUP:
                 case Token.TokenType.BUILT_IN_TYPE_NAME:
-
-                    // do nothing
                     break;
 
                 case Token.TokenType.IF:
@@ -315,7 +306,7 @@ namespace ProgrammingLanguageNr1
                     break;
 
                 case Token.TokenType.FUNC_DECLARATION:
-                    throw new Exception("Can't happen");
+                    throw new Exception("Can't happen: FUNC_DECLARATION should not be in the execution list.");
 
                 case Token.TokenType.VAR_DECLARATION:
                     VariableDeclaration();
@@ -382,9 +373,31 @@ namespace ProgrammingLanguageNr1
 					break;
 
                 default:
-                    throw new Exception("Hasn't implemented support for token type " + m_currentMemorySpace.CurrentNode.getTokenType() + " yet!");
+                    throw new Exception("Interpreter hasn't implemented support for token type " + m_currentMemorySpace.CurrentNode.getTokenType() + " yet!");
             }
 		}
+
+        private void HandleIfGoto()
+        {
+            var node = CurrentNode as AST_IfGotoNode;
+            if (node == null) {
+                throw new Error("Internal error: Expected an AST_IfGotoNode.");
+            }
+
+            // The condition expression was the child of this node and was already processed
+            // by the interpreter's post-order traversal, so its result is on the stack.
+            object conditionValue = PopValue();
+            bool condition = ConvertToBool(conditionValue);
+
+            Trace(() => $"IF_GOTO on condition '{conditionValue}' ({condition}). Jump taken: {condition}");
+
+            // The primitive is simple: jump if the condition is true.
+            if (condition)
+            {
+                m_currentMemorySpace.JumpToLabel(node.TargetLabel);
+            }
+            // If we don't jump, we do nothing. The main loop will automatically advance to the next instruction.
+        }
 
         static int ifCounter = 0;
 
@@ -406,8 +419,11 @@ namespace ProgrammingLanguageNr1
 				var token = ifnode.getToken ();
 				throw new Error ("Can't use value " + r + " of type " + ReturnValueConversions.PrettyObjectType (r.GetType()) + " in if-statement", Error.ErrorType.RUNTIME, token.LineNr, token.LinePosition);
 			}
+            
+            bool conditionResult = ConvertToBool(r);
+            Trace(() => $"IF Condition Value: '{r}' ({r.GetType().Name}), Evaluated As: {conditionResult}");
 
-			if (ConvertToBool(r))
+			if (conditionResult)
             {
                 subNode = ifnode.getChild(1);
             }
@@ -417,20 +433,11 @@ namespace ProgrammingLanguageNr1
                 {
                     subNode = ifnode.getChild(2);
                 }
-                else
-                {
-                    //Console.WriteLine("There is no else-clause in statement");
-                }
             }
 
             if (subNode != null)
             {
-                //Console.WriteLine("entering node");
                 PushNewScope(ifnode.getScope(), "IF_memorySpace" + ifCounter++, subNode);                
-            }
-            else
-            {
-                //Console.WriteLine("can't enter node");
             }
         }
 
@@ -454,15 +461,6 @@ namespace ProgrammingLanguageNr1
 
 		void CallExternalFunction(string pFunctionName, object[] pParameters)
 		{
-//			Console.WriteLine("Calling external function " + pFunctionName + " with parameters:");
-//			foreach (var p in pParameters) {
-//				if (p == null) {
-//					Console.WriteLine ("null");
-//				} else {
-//					Console.WriteLine ("" + p);
-//				}
-//			}
-
 			ExternalFunctionCreator.OnFunctionCall fc = m_externalFunctionCreator.externalFunctions[pFunctionName];
 			object rv = fc(pParameters);
 			if (!(rv is VoidType)) {
@@ -474,53 +472,26 @@ namespace ProgrammingLanguageNr1
         {
 			AST_FunctionDefinitionNode functionDefinitionNode = (CurrentNode as AST_FunctionCall).FunctionDefinitionRef;
             string functionName = functionDefinitionNode.getChild(1).getTokenString();
-
-			#if BUILT_IN_PROFILING
-			ProfileData data = null;
-			if (m_profileData.TryGetValue (functionName, out data)) {
-				data.calls++;
-			} else {
-				m_profileData.Add (functionName, new ProfileData () {
-					calls = 1,
-					totalTime = 0f,
-				});
-			}
-			#endif
-
 			var parameterDefs = functionDefinitionNode.getChild(2).getChildren();
-
-			//ASTPainter painter = new ASTPainter();
 
 			int nrOfParameters = parameterDefs.Count;
             object[] parameters = new object[nrOfParameters];
             for (int i = nrOfParameters - 1; i >= 0; i--)
             {
-				//painter.PaintAST(parameterDefs[i]);
-
 				var paramDef = parameterDefs[i];
 				var declaration = paramDef.getChild(0) as AST_VariableDeclaration;
-
 				parameters[i] = ReturnValueConversions.ChangeTypeBasedOnReturnValueType(PopValue(), declaration.Type);
-
             }
 
-			//try {
+			if (IsFunctionExternal(functionName)) {
+				CallExternalFunction(functionName, parameters);
+			} else {
+				PushNewScope(functionDefinitionNode.getScope(), functionName + "_memorySpace" + functionCounter++, functionDefinitionNode);
 
-				if (IsFunctionExternal(functionName)) {
-					CallExternalFunction(functionName, parameters);
-				} else {
-					PushNewScope(functionDefinitionNode.getScope(), functionName + "_memorySpace" + functionCounter++, functionDefinitionNode);
-
-					for (int i = nrOfParameters - 1; i >= 0; i--) {
-						PushValue(parameters[i]); // reverse order
-					}
+				for (int i = nrOfParameters - 1; i >= 0; i--) {
+					PushValue(parameters[i]); // reverse order
 				}
-
-//			}
-//			catch(Exception e) {
-//				Console.WriteLine("Exception when calling " + functionName + ": " + e.StackTrace);
-//				throw e;
-//			}
+			}
         }
 
 		private float ConvertToNumber(object o) {
@@ -541,150 +512,179 @@ namespace ProgrammingLanguageNr1
 		}
 
 		private bool ConvertToBool(object o) {
-			//Console.WriteLine("Converting " + o + " of type " + o.GetType() + " to bool");
 			if(o.GetType() == typeof(bool)) {
-				//Console.WriteLine(o + " is bool: " + (bool)o);
 				return (bool)o;
 			}
 			else if(o.GetType() == typeof(float)) {
-				return ((float)o == 0f ? false : true);
+				return ((float)o != 0f);
 			}
 			else if(o.GetType() == typeof(int)) {
-				return ((int)o == 0 ? false : true);
+				return ((int)o != 0);
 			}
 			throw new Error("Can't convert value " + o + " of type " + ReturnValueConversions.PrettyObjectType(o.GetType()) + " to bool");
 		}
 
         private void Operator()
-        {
-            object result;
-            float rhs, lhs;
+		{
+			object result;
+			float rhs, lhs;
+			string op = CurrentNode.getTokenString();
 
-            switch (CurrentNode.getTokenString())
-            {
-                case "+":
-                    result = AddStuffTogetherHack();
-                    break;
-
-                case "-":
-					rhs = ConvertToNumber(PopValue());
-                    lhs = ConvertToNumber(PopValue());
-                    result = lhs - rhs;
-                    break;
-
-                case "*":
-                    result = ConvertToNumber(PopValue()) * ConvertToNumber(PopValue());
-                    break;
-
-                case "/":
-                    rhs = ConvertToNumber(PopValue());
-                    lhs = ConvertToNumber(PopValue());
-                    result = lhs / rhs;
-                    break;
-                case "<":
-                    rhs = ConvertToNumber(PopValue());
-                    lhs = ConvertToNumber(PopValue());
-                    result = lhs < rhs;
-                    break;
-                case ">":
-                    rhs = ConvertToNumber(PopValue());
-                    lhs = ConvertToNumber(PopValue());
-                    result = lhs > rhs;
-                    break;
-				case ">=":
-                    rhs = ConvertToNumber(PopValue());
-                    lhs = ConvertToNumber(PopValue());
-                    result = lhs >= rhs;
-                    break;
-				case "<=":
-                    rhs = ConvertToNumber(PopValue());
-                    lhs = ConvertToNumber(PopValue());
-                    result = lhs <= rhs;
-                    break;
-				case "==":
-                    result = equalityTest();
-                    break;
-				case "!=":
-					result = !ConvertToBool(equalityTest());
-                    break;
-                case "&&":
-
-				object a = PopValue();
-				bool a_bool = ConvertToBool(a);
-				//Console.WriteLine(a + " is of type " + a.GetType() + " , converted " + a_bool + " is of type " + a_bool.GetType());
-				object b = PopValue();
-				bool b_bool = ConvertToBool(b);
-				result = a_bool && b_bool;
-//				Console.WriteLine(string.Format("using &&, a = {0}, b = {1}, a_bool = {2}, b_bool = {3}, result = {4}", a, b, a_bool, b_bool, result));
-
-                    break;
-
-				case "||":
-
-				object a2 = PopValue();
-				bool a2_bool = ConvertToBool(a2);
-				//Console.WriteLine(a + " is of type " + a.GetType() + " , converted " + a_bool + " is of type " + a_bool.GetType());
-				object b2 = PopValue();
-				bool b2_bool = ConvertToBool(b2);
-				result = a2_bool || b2_bool;
-//				Console.WriteLine(string.Format("using ||, a2 = {0}, b2 = {1}, a2_bool = {2}, b2_bool = {3}, result = {4}", a2, b2, a2_bool, b2_bool, result));
-
+			switch (op)
+			{
+				case "+":
+					result = AddStuffTogetherHack();
 					break;
 
-                default:
-                    throw new Exception("Operator " + CurrentNode.getTokenString() + " is not implemented yet!");
-            }
+				case "-":
+					rhs = ConvertToNumber(PopValue());
+					lhs = ConvertToNumber(PopValue());
+					result = lhs - rhs;
+					Trace(() => $"OPERATOR: {lhs} - {rhs} -> {result}");
+					break;
 
-            //Console.WriteLine("Executing operator " + CurrentNode.getTokenString() + " with result " + result);
+				case "*":
+					rhs = ConvertToNumber(PopValue());
+					lhs = ConvertToNumber(PopValue());
+					result = lhs * rhs;
+					Trace(() => $"OPERATOR: {lhs} * {rhs} -> {result}");
+					break;
+
+				case "/":
+					rhs = ConvertToNumber(PopValue());
+					if (rhs == 0f)
+					{
+						Trace(() => "OPERATOR /: Division by zero. Returning 0.");
+						result = 0f;
+					}
+					else
+					{
+						lhs = ConvertToNumber(PopValue());
+						result = lhs / rhs;
+						Trace(() => $"OPERATOR: {lhs} / {rhs} -> {result}");
+					}
+					break;
+					
+				// --- FIX START: Implemented the Modulus Operator ---
+				case "%":
+					rhs = ConvertToNumber(PopValue());
+					if (rhs == 0f)
+					{
+						Trace(() => "OPERATOR %: Division by zero. Returning 0.");
+						result = 0f;
+					}
+					else
+					{
+						lhs = ConvertToNumber(PopValue());
+						result = lhs % rhs;
+						Trace(() => $"OPERATOR: {lhs} % {rhs} -> {result}");
+					}
+					break;
+				// --- FIX END ---
+					
+				case "<":
+					rhs = ConvertToNumber(PopValue());
+					lhs = ConvertToNumber(PopValue());
+					result = lhs < rhs;
+					Trace(() => $"OPERATOR: {lhs} < {rhs} -> {result}");
+					break;
+				case ">":
+					rhs = ConvertToNumber(PopValue());
+					lhs = ConvertToNumber(PopValue());
+					result = lhs > rhs;
+					Trace(() => $"OPERATOR: {lhs} > {rhs} -> {result}");
+					break;
+				case ">=":
+					rhs = ConvertToNumber(PopValue());
+					lhs = ConvertToNumber(PopValue());
+					result = lhs >= rhs;
+					Trace(() => $"OPERATOR: {lhs} >= {rhs} -> {result}");
+					break;
+				case "<=":
+					rhs = ConvertToNumber(PopValue());
+					lhs = ConvertToNumber(PopValue());
+					result = lhs <= rhs;
+					Trace(() => $"OPERATOR: {lhs} <= {rhs} -> {result}");
+					break;
+				case "==":
+					result = equalityTest();
+					break;
+				case "!=":
+					result = !ConvertToBool(equalityTest());
+					Trace(() => $"OPERATOR != -> {result}");
+					break;
+				case "&&":
+					{
+						object a = PopValue();
+						bool a_bool = ConvertToBool(a);
+						object b = PopValue();
+						bool b_bool = ConvertToBool(b);
+						result = a_bool && b_bool;
+						Trace(() => $"OPERATOR &&: '{a}' && '{b}' -> {result}");
+					}
+					break;
+				case "||":
+					{
+						object a2 = PopValue();
+						bool a2_bool = ConvertToBool(a2);
+						object b2 = PopValue();
+						bool b2_bool = ConvertToBool(b2);
+						result = a2_bool || b2_bool;
+						Trace(() => $"OPERATOR ||: '{a2}' || '{b2}' -> {result}");
+					}
+					break;
+				default:
+					throw new Exception("Operator " + op + " is not implemented yet!");
+			}
 			
-            PushValue(result);
-        }
+			PushValue(result);
+		}
 		
 		private object equalityTest() {
 			object rhs = PopValue();
             object lhs = PopValue();
+            object result;
 
-			//Console.WriteLine("Comparing " + lhs + " of type " + lhs.GetType() + " with " + rhs + " of type " + rhs.GetType());
+            var traceBuilder = new StringBuilder();
+            traceBuilder.Append($"OPERATOR ==: '{lhs}' ({lhs.GetType().Name}) == '{rhs}' ({rhs.GetType().Name}) -> ");
 
 			if (lhs == rhs) {
-				//Console.WriteLine("Same object, result = true");
-				return true;
+				result = true;
 			}
-
-			if(lhs.GetType() == typeof(float) && lhs.GetType() == rhs.GetType()) {
-				return (((float)rhs) == ((float)lhs));
+			else if(lhs.GetType() == typeof(float) && lhs.GetType() == rhs.GetType()) {
+				result = (((float)rhs) == ((float)lhs));
 			}
 			else if(lhs.GetType() == typeof(int) && lhs.GetType() == rhs.GetType()) {
-				return (((int)rhs) == ((int)lhs));
+				result = (((int)rhs) == ((int)lhs));
 			}
 			else if(lhs.GetType() == rhs.GetType() && rhs is IComparable && lhs is IComparable)
 			{
-				bool result = (rhs as IComparable).CompareTo(lhs as IComparable) == 0;
-				//Console.WriteLine("Result = " + result);
-				return result;
+				result = (rhs as IComparable).CompareTo(lhs as IComparable) == 0;
 			}
-						
-			//throw new Error("Can't compare those two things (" + lhs.ToString() + " of type " + lhs.GetType() + " and " + rhs.ToString() + " of type " + rhs.GetType() + ")");
+			else {
+			    result = false;
+            }
 
-			return false;
+            traceBuilder.Append(result);
+            Trace(() => traceBuilder.ToString());
+            return result;
 		}
 		
 		private object AddStuffTogetherHack() {
 		
 			object rhs = PopValue();
 			object lhs = PopValue();
-
+            object result;
+				
 			var rightValueType = rhs.GetType ();
 			var leftValueType = lhs.GetType ();
-				
-			//Console.WriteLine("Adding " + lhs + " of type " + leftValueType + " together with " + rhs + " of type " + rightValueType);
 
 			if (rightValueType == typeof(float) && leftValueType == typeof(float)) {
-				return (float)rhs + (float)lhs;
-			} if (rightValueType == typeof(int) && leftValueType == typeof(int)) {
-				return (float)((int)rhs + (int)lhs);
+				result = (float)rhs + (float)lhs;
+			} else if (rightValueType == typeof(int) && leftValueType == typeof(int)) {
+				result = (float)((int)rhs + (int)lhs);
 			} else if (rightValueType == typeof(string) || leftValueType == typeof(string)) {
-				return ReturnValueConversions.PrettyStringRepresenation(lhs) + ReturnValueConversions.PrettyStringRepresenation(rhs);
+				result = ReturnValueConversions.PrettyStringRepresenation(lhs) + ReturnValueConversions.PrettyStringRepresenation(rhs);
 			} else if (rightValueType == typeof(object[]) && leftValueType == typeof(object[])) {
 				throw new Error("Primitive array concatenation is temporarily disabled.");
 			} else if (rightValueType == typeof(SortedDictionary<KeyWrapper, object>) && leftValueType == typeof(SortedDictionary<KeyWrapper, object>)) {
@@ -697,24 +697,30 @@ namespace ProgrammingLanguageNr1
 				for(int i = 0; i < rhsArray.Count; i++) {
 					newArray.Add(new KeyWrapper((float)(i + lhsArray.Count)), rhsArray[new KeyWrapper(i)]);
 				}
-				Console.WriteLine ("Created new array by concatenation: " + ReturnValueConversions.PrettyStringRepresenation(newArray));
-				return newArray;
+				result = newArray;
 			}
 			else {
 				throw new Error ("Can't add " + lhs + " to " + rhs);
 			}		
+
+            Trace(() => $"OPERATOR +: '{lhs}' + '{rhs}' -> '{result}'");
+            return result;
 		}
 
         private void ResolveVariableName()
         {
-            object value = m_currentScope.getValue(CurrentNode.getTokenString());
+            string varName = CurrentNode.getTokenString();
+            object value = m_currentScope.getValue(varName);
+            Trace(() => $"LOAD_VAR '{varName}' -> '{value}' ({value.GetType().Name})");
             PushValue(value);
         }
 
 		private void Not() {
 			object a = PopValue();
 			bool a_bool = ConvertToBool(a);
-			PushValue(!a_bool);
+            bool result = !a_bool;
+            Trace(() => $"OPERATOR !: !'{a}' -> {result}");
+			PushValue(result);
 		}
 		
 		private void ArrayLookup() 
@@ -724,9 +730,7 @@ namespace ProgrammingLanguageNr1
 			object val = null;
 
 			if (array is Range) {
-				//Console.WriteLine ("LOOKING UP KEY " + index + " IN RANGE " + array.ToString ());
-
-				if (index.GetType () == typeof(float)) {
+				if (index.GetType() == typeof(float)) {
 					Range range = (Range)array;
 					float i = range.step * (int)(float)index;
 					float theNumber = range.start + i;
@@ -745,30 +749,19 @@ namespace ProgrammingLanguageNr1
 						throw new Error ("Index " + index.ToString () + " is outside the range " + array.ToString ());
 					}
 					val = (float)theNumber;
-					//Console.WriteLine("The result was " + val);
 				} else {
 					throw new Error ("Can't look up " + index.ToString () + " in the range " + array.ToString ());
 				}
 
-			} else if (array.GetType () == typeof(SortedDictionary<KeyWrapper,object>)) {
-				//Console.WriteLine ("LOOKING UP KEY " + index + " of type " + index.GetType() + " IN ARRAY " + ReturnValueConversions.PrettyStringRepresenation(array));
-
+			} else if (array.GetType() == typeof(SortedDictionary<KeyWrapper,object>)) {
 				var a = array as SortedDictionary<KeyWrapper,object>;
-
 				if (a.TryGetValue(new KeyWrapper(index), out val)) {
-					//Console.WriteLine("The result was " + val);
 				} else {
 					throw new Error ("Can't find the index '" + index + "' (" + ReturnValueConversions.PrettyObjectType(index.GetType ()) + ") in the array '" + CurrentNode.getTokenString () + "'", Error.ErrorType.RUNTIME, CurrentNode.getToken ().LineNr, CurrentNode.getToken ().LinePosition);
 				}
-			} else if (array.GetType () == typeof(object[])) {
+			} else if (array.GetType() == typeof(object[])) {
 				throw new Error("Illegal object[] array: " + ReturnValueConversions.PrettyStringRepresenation(array));
-//				var a = (object[])array;
-//				if(index.GetType() != typeof(float)) {
-//					throw new Exception("Index " + index + " is of wrong type: " + index.GetType());
-//				}
-//				int i = (int)(float)index;
-//				val = a[i];
-			} else if (array.GetType () == typeof(string)) {
+			} else if (array.GetType() == typeof(string)) {
 				int i = 0;
 				if(index.GetType() == typeof(float)) {
 					i = (int)(float)index;
@@ -787,23 +780,18 @@ namespace ProgrammingLanguageNr1
 			} else {
 				throw new Error ("Can't convert " + array.ToString () + " to an array (for lookup)");
 			}
-
 			PushValue (val);
 		}
 
 		void PushValueFromToken ()
 		{
-			/*#if DEBUG
-			if (CurrentNode == null) {
-				throw new Exception("Current node is null");
-			}
-			#endif*/
-
 			TokenWithValue t = CurrentNode.getToken() as TokenWithValue;
 			if (t == null) {
 				throw new Exception ("Can't convert current node to TokenWithValue: " + CurrentNode + ", it's of type " + CurrentNode.getTokenType());
 			}
-			PushValue(t.getValue());
+            var value = t.getValue();
+            Trace(() => $"PUSH '{value}' ({value.GetType().Name})");
+			PushValue(value);
 		}
 
         private void VariableDeclaration()
@@ -844,7 +832,6 @@ namespace ProgrammingLanguageNr1
 		
 		private object ConvertToType(object valueToConvert, Type type) {
 			var returnValueType = ReturnValueConversions.SystemTypeToReturnValueType(type);
-//			Console.WriteLine("Assignment of " + ReturnValueConversions.PrettyStringRepresenation(valueToConvert) + " will convert it from " + valueToConvert.GetType() + " to " + type.ToString() + " (" + returnValueType + ")");
 			object newObject = ReturnValueConversions.ChangeTypeBasedOnReturnValueType(valueToConvert, returnValueType);
 			return newObject;
 		}
@@ -862,14 +849,10 @@ namespace ProgrammingLanguageNr1
 			string variableName = (CurrentNode as AST_Assignment).VariableName;
 			object valueToSet = PopValue();
 			object index = PopValue();
-
 			object rv = m_currentScope.getValue(variableName);
 
 			if (rv.GetType () == typeof(SortedDictionary<KeyWrapper,object>)) {
 				SortedDictionary<KeyWrapper, object> array = rv as SortedDictionary<KeyWrapper, object>;				
-
-				//Console.WriteLine("Checking if index " + index + " of type " + index.GetType() + " is within range of array of length " + array.Count);
-
 				if(array.ContainsKey(new KeyWrapper(index))) {
 					array[new KeyWrapper(index)] = valueToSet;
 				}
@@ -885,14 +868,12 @@ namespace ProgrammingLanguageNr1
 
         private void ArrayEndSignal() 
 		{
-			// pop the right number of values and add them to a new object of array type
 			AST_ArrayEndSignal arrayEndSignal = CurrentNode as AST_ArrayEndSignal;
 			SortedDictionary<KeyWrapper, object> array = new SortedDictionary<KeyWrapper, object>();
 			object[] values = new object[arrayEndSignal.ArraySize];
 			for(int i = 0; i < arrayEndSignal.ArraySize; i++) {
 				values[i] = PopValue();
 			}
-			//for(int i = 0; i < arrayEndSignal.ArraySize; i++) {
 			for(int i = arrayEndSignal.ArraySize - 1; i >= 0; i--) {
 				array.Add(new KeyWrapper((float)(arrayEndSignal.ArraySize - i - 1)), values[i]);
 			}
@@ -901,14 +882,12 @@ namespace ProgrammingLanguageNr1
 
         private void ReturnSignal()
         {
-            // Pop back to function-scope
             while ( (m_currentScope.scopeType != Scope.ScopeType.FUNCTION_SCOPE) &&
 			        (m_currentScope.scopeType != Scope.ScopeType.MAIN_SCOPE) )
             {
 				PopCurrentScope();
 			}
-			// .. and then pop one more (the actual function scope)
-            m_currentMemorySpace.MoveToEnd(); // (must use MoveToEnd to make returning from main possible)
+            m_currentMemorySpace.MoveToEnd();
         }
 		
 		static int loopBlockCounter = 0;
@@ -927,33 +906,23 @@ namespace ProgrammingLanguageNr1
 			#if DEBUG
 			Debug.Assert(loopNode != null);
 			#endif
-
-//			Console.WriteLine("At Loop node with scope " + loopNode.getScope().getName());
-//			Console.WriteLine("Memory spaces: ");
-//			foreach(var mem in loopNode.getScope().memorySpaces) {
-//				Console.WriteLine(mem.getName());
-//			}
-
 			PushNewScope(loopNode.getScope(), "Loop_memorySpace_" + loopCounter++, loopNode.getChild(0));
         }
 
         private void BreakStatement()
         {
-			// Pop back to loop-scope
 			while( (m_currentScope.scopeType != Scope.ScopeType.LOOP_SCOPE) &&
 			       (m_currentScope.scopeType != Scope.ScopeType.MAIN_SCOPE) ) 
 			{
 				PopCurrentScope();
 			}
-			// .. and then pop one more
 			m_currentMemorySpace.MoveToEnd();
         }
 		
 		private void GotoBeginningOfLoop() 
 		{
-			//m_currentMemorySpace.MoveToStart();
 			PopCurrentScope();
-			m_currentMemorySpace.Jump(-1); // move back to the start of the loop
+			m_currentMemorySpace.Jump(-1);
 		}
 		
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
@@ -994,32 +963,6 @@ namespace ProgrammingLanguageNr1
             return poppedValue;
         }
 
-//		public float PopNumberValue() {
-//			object n = PopValue();
-//			if(n.GetType() == typeof(float)) {
-//				return (float)n;
-//			}
-//			else if(n.GetType() == typeof(int)) {
-//				return (float)(int)n;
-//			}
-//			else {
-//				throw new Error("Can't convert value " + n.ToString() + " of type " + n.GetType() + " to a number");
-//			}
-//		}
-//
-//		public bool PopBoolValue() {
-//			object n = PopValue();
-//			if(n.GetType() == typeof(bool)) {
-//				return (bool)n;
-//			}
-//			else if(n.GetType() == typeof(float)) {
-//				return ((float)n != 0f) ? true : false;
-//			}
-//			else {
-//				throw new Error("Can't convert value " + n.ToString() + " of type " + n.GetType() + " to a bool");
-//			}
-//		}
-
         public void PushValue(object value)
         {
 #if PRINT_STACK
@@ -1059,10 +1002,9 @@ namespace ProgrammingLanguageNr1
         Stack<MemorySpace> m_memorySpaceStack = new Stack<MemorySpace>();
         Stack<object> m_valueStack = new Stack<object>();
 		MemorySpaceNodeListCache m_memorySpaceNodeListCache = new MemorySpaceNodeListCache();
-		int m_topLevelDepth = 0; // the stack depth at wich the program starts and ends, normally 0 but can be 1 if jumping into a function
+		int m_topLevelDepth = 0;
     }
 }
-
 
 public class ProfileData {
 	public int calls;

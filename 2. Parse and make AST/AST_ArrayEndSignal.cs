@@ -17,8 +17,13 @@ namespace ProgrammingLanguageNr1
 			}
 		}
 
+		public override AST Clone()
+		{
+			var clone = (AST_ArrayEndSignal)base.Clone();
+			clone.m_arraySize = this.m_arraySize;
+			return clone;
+		}
 		
 		private int m_arraySize;
 	}
 }
-

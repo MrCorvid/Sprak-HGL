@@ -19,5 +19,12 @@ namespace ProgrammingLanguageNr1
             get { return m_functionDefinitionRef; }
             set { m_functionDefinitionRef = value; }
         }
+
+		public override AST Clone()
+		{
+			var clone = (AST_FunctionCall)base.Clone();
+			clone.FunctionDefinitionRef = this.FunctionDefinitionRef;
+			return clone;
+		}
     }
 }

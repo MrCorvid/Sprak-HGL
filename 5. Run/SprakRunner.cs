@@ -18,34 +18,9 @@ namespace ProgrammingLanguageNr1
         new FunctionDocumentation("Count the number of elements in an array", new string[] { "The array" });
             result.Add(new FunctionDefinition("number", "Count", new string[] { "array" }, new string[] { "a" }, new ExternalFunctionCreator.OnFunctionCall(API_count), functionDoc_Count));
 
-			// Need an add-function???!
-//			FunctionDocumentation functionDoc_add =
-//				new FunctionDocumentation("Add an element to the end of the array", new string[] { "The element" });
-//			result.Add(new FunctionDefinition("array", "add", new string[] { "var" }, new string[] { "element" }, new ExternalFunctionCreator.OnFunctionCall(API_add), functionDoc_add));
-
-//            FunctionDocumentation functionDoc_allocate =
-//                new FunctionDocumentation("Create a new array with X number of elements", new string[] { "How many elements the array should hold" });
-//            result.Add(new FunctionDefinition("number", "allocate", new string[] { "number" }, new string[] { "X" }, new ExternalFunctionCreator.OnFunctionCall(API_allocate), functionDoc_allocate));
-
             FunctionDocumentation functionDoc_Range =
 				new FunctionDocumentation("Create a range of numbers from 'min' to (and including) 'max'", new string[] { "The start value of the range", "The end value of the range" });
             result.Add(new FunctionDefinition("number", "Range", new string[] { "number", "number" }, new string[] { "min", "max" }, new ExternalFunctionCreator.OnFunctionCall(API_range), functionDoc_Range));
-
-//            FunctionDocumentation functionDoc_toArray =
-//                new FunctionDocumentation("Convert something to an array", new string[] { "The value to convert" });
-//            result.Add(new FunctionDefinition("array", "toArray", new string[] { "var" }, new string[] { "value" }, new ExternalFunctionCreator.OnFunctionCall(API_toArray), functionDoc_toArray));
-//
-//            FunctionDocumentation functionDoc_toNumber =
-//                new FunctionDocumentation("Convert something to a number", new string[] { "The value to convert" });
-//            result.Add(new FunctionDefinition("number", "toNumber", new string[] { "var" }, new string[] { "value" }, new ExternalFunctionCreator.OnFunctionCall(API_toNumber), functionDoc_toNumber));
-//
-//            FunctionDocumentation functionDoc_toString =
-//                new FunctionDocumentation("Convert something to a string", new string[] { "The value to convert" });
-//            result.Add(new FunctionDefinition("string", "toString", new string[] { "var" }, new string[] { "value" }, new ExternalFunctionCreator.OnFunctionCall(API_toString), functionDoc_toString));
-//
-//            FunctionDocumentation functionDoc_toBool =
-//                new FunctionDocumentation("Convert something to a bool", new string[] { "The value to convert" });
-//            result.Add(new FunctionDefinition("bool", "toBool", new string[] { "var" }, new string[] { "value" }, new ExternalFunctionCreator.OnFunctionCall(API_toBool), functionDoc_toBool));
 
             FunctionDocumentation functionDoc_GetIndexes =
                 new FunctionDocumentation("Create a new array that contains the indexes of another array", new string[] { "The array with indexes" });
@@ -291,7 +266,6 @@ namespace ProgrammingLanguageNr1
             allFunctionDefinitions.AddRange(builtInFunctions);
             allFunctionDefinitions.AddRange(functionDefinitions);
             
-			// HasFunction requires a reference to the SprakRunner
 			FunctionDocumentation functionDoc_HasFunction =
 				new FunctionDocumentation("Check if a function exists on the object", new string[] { "The name of the function" });
 			allFunctionDefinitions.Add(new FunctionDefinition("bool", "HasFunction", new string[] { "string" }, new string[] { "functionName" }, new ExternalFunctionCreator.OnFunctionCall(API_hasFunction), functionDoc_HasFunction));
@@ -318,11 +292,8 @@ namespace ProgrammingLanguageNr1
 		{
 			if (!m_interpreter.ValueStackIsEmpty()) {
 				object result = m_interpreter.PopValue();
-				//Console.WriteLine("GetFinalobject: " + result);
 				return result;
 			} else {
-				// no value left on the stack to pop, might be OK in some circumstances (like calling a void remote fn with the normal RemoteFunctionCall function)
-				//Console.WriteLine("GetFinalobject: Stacksize 0");
 				return VoidType.voidType;
 			}
 		}
@@ -356,7 +327,6 @@ namespace ProgrammingLanguageNr1
 			else if (args [0].GetType () == typeof(Range)) {
 				Range r = (Range)args [0];
 				Range indexRange = new Range (0, Math.Abs ((int)(r.end - r.start)) + 1, 1);
-				//Console.WriteLine ("GetIndexes created index range: " + indexRange);
 				return indexRange;
 			} 
 			else if (args [0].GetType () == typeof(string)) {
@@ -400,7 +370,6 @@ namespace ProgrammingLanguageNr1
 			SortedDictionary<KeyWrapper, object> array = args[0] as SortedDictionary<KeyWrapper,object>;
 			object val = args [1];
 
-			// Slow but correct way of doing it:
 			int maxArrayIndex = -1;
 			foreach (var keyWrapper in array.Keys) {
 				var key = keyWrapper.value;
@@ -413,7 +382,6 @@ namespace ProgrammingLanguageNr1
 					maxArrayIndex = (int)key;
 				}
 			}
-			//int maxArrayIndex = array.Count; // TODO: this is a bug if the array contains sparse indexes or stuff like that
 
 			KeyWrapper newIndex = new KeyWrapper((float)maxArrayIndex + 1);
 
@@ -457,26 +425,16 @@ namespace ProgrammingLanguageNr1
 			return array;
 		}
 
-//		private static object API_add(object[] args)
-//		{
-//			object elem = args [0];
-//
-//			array.Add(i, new object(ReturnValueType.NUMBER));
-//		}
-
         private static object API_range(object[] args)
         {
 			int start = (int)(float)args[0];
 			int end = (int)(float)args[1];
 
 			if (Math.Abs (start - end) > 50) {
-				// Create a range
 				int step = start < end ? 1 : -1;
 				var range = new Range (start, end, step);
-				//Console.WriteLine ("Created a range: " + range.ToString ());
 				return range;
 			} else {
-				// Create a normal array
 				SortedDictionary<KeyWrapper, object> array = new SortedDictionary<KeyWrapper, object> ();
 			
 				int step = 0;
@@ -489,7 +447,6 @@ namespace ProgrammingLanguageNr1
 				}		
 				int index = 0;
 				for (int nr = start; nr != end; nr += step) {
-					//Console.WriteLine("nr: " + nr);
 					array [new KeyWrapper((float)index)] = (float)nr;
 					index++;
 				}
@@ -541,7 +498,6 @@ namespace ProgrammingLanguageNr1
             ScopeBuilder scopeBuilder = new ScopeBuilder(ast, m_compileTimeErrorHandler);
             scopeBuilder.process();
             Scope globalScope = scopeBuilder.getGlobalScope();
-			//Console.WriteLine("\nScopes: \n" + globalScope + "\n\n");
             return globalScope;
         }
 		
@@ -594,8 +550,6 @@ namespace ProgrammingLanguageNr1
 			}
             else 
             {
-				//Console.WriteLine("Can't run program since it contains errors!");
-                //m_compileTimeErrorHandler.printErrorsToConsole();
 			}
 		}
 
@@ -607,7 +561,6 @@ namespace ProgrammingLanguageNr1
 
 		public void HardReset ()
 		{
-			// Setting these three things to null actually fixes the memory leak!
 			m_ast = null;
 			m_interpreter = null;
 			m_programIterator = null;
@@ -630,15 +583,9 @@ namespace ProgrammingLanguageNr1
 			}
         }
 
-		/// <summary>
-		/// Returns true if the function existed
-		/// </summary>
 		public InterpreterTwo.ProgramFunctionCallStatus ResetAtFunction(string functionName, object[] args) 
 		{
-			//Console.WriteLine("Will call " + functionName);
-
 			if (m_interpreter == null) {
-				//throw new Exception("Interpreter is null!");
 				Console.WriteLine("Interpreter is null when resetting at function " + functionName);
 				return InterpreterTwo.ProgramFunctionCallStatus.NO_FUNCTION;
 			}
@@ -659,12 +606,10 @@ namespace ProgrammingLanguageNr1
         {
             if (m_compileTimeErrorHandler.getErrors().Count != 0)
             {
-				//Console.WriteLine("Can't run program since it contains errors!");
                 return m_started = false;
             }
 
 			if(m_interpreter == null) {
-				//throw new Error("Can't start program because of errors.");
 				Console.WriteLine("m_interpreter is null");
 				return false;
 			}
@@ -699,10 +644,6 @@ namespace ProgrammingLanguageNr1
 				m_runtimeErrorHandler.errorOccured(sprakError);
 				return InterpreterTwo.Status.ERROR;
 			}
-			/*catch(Exception e) {
-				m_runtimeErrorHandler.errorOccured(new Error("Exception: " + e.Message));
-				return InterpreterTwo.Status.ERROR;
-			}*/
         }
 
         public bool isStarted
@@ -726,14 +667,6 @@ namespace ProgrammingLanguageNr1
 			}
 		}
 
-		public Dictionary<string, ProfileData> GetProfileData() {
-			#if BUILT_IN_PROFILING
-				return m_interpreter.profileData;
-			#else
-				return new Dictionary<string, ProfileData>();
-			#endif
-		}
-
 		public InterpreterTwo? GetInterpreter()
 		{
 			return m_interpreter;
@@ -753,4 +686,3 @@ namespace ProgrammingLanguageNr1
 		public bool returnFromExternalFunctionCall;
     }
 }
-

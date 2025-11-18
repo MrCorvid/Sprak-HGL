@@ -1,4 +1,4 @@
-//#define WRITE_DEBUG_INFO
+// In ProgrammingLanguageNr1 folder
 
 using System;
 using System.Collections.Generic;
@@ -19,97 +19,32 @@ namespace ProgrammingLanguageNr1
 
 			m_name = name;
             m_scope = scope;
-			m_cache = cache;
-
-            //Console.WriteLine("Creating list of nodes from tree: " + root.getTreeAsString());
 			
-			if(m_cache.hasCachedFunction(root)) {
-				//Console.WriteLine("Found cached list for " + m_name);
-				m_nodes = m_cache.getList(root).ToArray();
-			}
-			else {
-				List<AST> list = new List<AST>();
-            	addToList(list, root);
-				m_cache.addMemorySpaceList(list, root);
-            	m_nodes = list.ToArray();
-				//Console.WriteLine("Created new list for " + m_name);
-			}
+            // Use the cache to get the flattened list of nodes and the map of labels.
+            // This is the central change from the old implementation.
+			var cacheResult = cache.GetNodeList(root);
+            m_nodes = cacheResult.Nodes;
+            m_labelMap = cacheResult.LabelMap;
             
-            m_currentNode = -1;
-
-            //Console.WriteLine("New memory space " + name + " has got " + list.Count + " AST nodes in its list.");
+            m_currentNode = -1; // Start before the first instruction.
 
 			nrOfMemorySpacesInMemory++;
-			//Console.WriteLine("CREATED " + name);
 		}
 
 		~MemorySpace() {
 			nrOfMemorySpacesInMemory--;
-			//Console.WriteLine("DELETED " + m_name);
 		}
 
-        private void addToList(List<AST> list, AST ast)
-        {
-            switch (ast.getTokenType())
-            {
-                case  Token.TokenType.FUNC_DECLARATION:
-                    addToList(list, ast.getChild(2));
-                    addToList(list, ast.getChild(3));
-                    break;
-
-                case Token.TokenType.IF:
-                    addToList(list, ast.getChild(0));
-                    list.Add(ast);
-#if WRITE_DEBUG_INFO
-                    Console.WriteLine(": " + ast.getTokenString() + " of type " + ast.getTokenType());
-#endif
-                    break;
-
-                case Token.TokenType.LOOP:
-                    list.Add(ast);
-#if WRITE_DEBUG_INFO
-                    Console.WriteLine(": " + ast.getTokenString() + " of type " + ast.getTokenType());
-#endif
-                    break;
-				
-				case Token.TokenType.LOOP_BLOCK:
-					list.Add(ast);
-#if WRITE_DEBUG_INFO
-                    Console.WriteLine(": " + ast.getTokenString() + " of type " + ast.getTokenType());
-#endif
-                    break;
-
-                default:
-                    addChildren(list, ast);
-#if WRITE_DEBUG_INFO
-                    Console.WriteLine(": " + ast.getTokenString() + " of type " + ast.getTokenType());
-#endif
-                    list.Add(ast);
-                    break;
-            }
-        }
-
-        private void addChildren(List<AST> list, AST ast)
-        {
-            List<AST> children = ast.getChildren();
-            if (children != null)
-            {
-                foreach (AST child in children)
-                {
-                    addToList(list, child);
-                }
-            }
-        }
+        // The old private methods 'addToList' and 'addChildren' have been removed,
+        // as this logic is now correctly handled by MemorySpaceNodeListCache.
 		
 		public void setValue(string name, object val) {
             Debug.Assert(name != null);
             Debug.Assert(val != null);
 
 			if(m_valuesForStrings.ContainsKey(name)) {
-				//Console.WriteLine("Setting the value with name " + name + " and type " + val.getReturnValueType() + " to " + val + " in " + getName());
 				m_valuesForStrings[name] = val;
 			} else {
-				//Console.WriteLine("Setting a new value with name " + name + " and type " + val.getReturnValueType() + " to " + val + " in " + getName());
 				m_valuesForStrings.Add(name, val);
 			}
 		}
@@ -145,22 +80,20 @@ namespace ProgrammingLanguageNr1
         {
             get
             {
-                return m_nodes[m_currentNode];
+                if (m_currentNode >= 0 && m_currentNode < m_nodes.Count)
+                {
+                    return m_nodes[m_currentNode];
+                }
+                // This might happen if the program counter is manipulated unexpectedly.
+                // Returning a dummy EOF node can prevent crashes in some edge cases.
+                return new AST(new Token(Token.TokenType.EOF, "<OUT_OF_BOUNDS>"));
             }
         }
 
         public bool Next()
         {
-            if (m_currentNode < m_nodes.Length - 1)
-            {
-                m_currentNode++;
-                //Console.WriteLine(getName() + " increased iterator to " + m_currentNode);
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            m_currentNode++;
+            return m_currentNode < m_nodes.Count;
         }
 		
 		public void MoveToStart()
@@ -170,7 +103,7 @@ namespace ProgrammingLanguageNr1
 		
         public void MoveToEnd()
         {
-            m_currentNode = m_nodes.Length;
+            m_currentNode = m_nodes.Count;
         }
 		
 		public void Jump(int steps)
@@ -178,42 +111,43 @@ namespace ProgrammingLanguageNr1
             m_currentNode += steps;
         }
 
-        public void SetCurrentNode()
+        /// <summary>
+        /// Jumps the program counter to the specified label name.
+        /// </summary>
+        public void JumpToLabel(string label)
         {
-            m_currentNode = m_nodes.Length;
+            if (m_labelMap.TryGetValue(label, out int index))
+            {
+                // Set the program counter to the instruction *before* the label.
+                // The interpreter's main loop will call Next() immediately after this,
+                // which increments the counter to the correct target instruction.
+                m_currentNode = index - 1;
+            }
+            else
+            {
+                throw new Error($"Runtime error: Can't find label '{label}' in the current execution scope '{m_name}'.");
+            }
         }
 
         public Scope Scope
         {
             get { return m_scope; }
         }
-
-		public void TraceParentScopes ()
-		{
-			Console.Write("Parent scopes of " + getName() + ": ");
-			Scope s = m_scope;
-			while(s != null) {
-				Console.Write(s.getName() + ", ");
-				s = s.getEnclosingScope();
-			}
-			Console.WriteLine("");
-		}
 				
 		public void Delete() {
 			m_name = "";
 			m_valuesForStrings = null;
 			m_nodes = null;
+            m_labelMap = null;
 			m_currentNode = -1;
 			m_scope = null;
-			m_cache = null;
 		}
 
 		string m_name;
         Dictionary<string, object> m_valuesForStrings = new Dictionary<string, object>();
-        AST[] m_nodes;
+        IReadOnlyList<AST> m_nodes;
+        IReadOnlyDictionary<string, int> m_labelMap; // Stores locations of labels for GOTO.
         int m_currentNode;
         Scope m_scope;
-  		MemorySpaceNodeListCache m_cache;      
 	}
 }
-

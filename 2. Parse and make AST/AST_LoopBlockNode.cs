@@ -19,7 +19,13 @@ namespace ProgrammingLanguageNr1
 		public void setScope(Scope scope) { m_scope = scope; }
 		public Scope getScope() { return m_scope; }
         
+		public override AST Clone()
+		{
+			var clone = (AST_LoopBlockNode)base.Clone();
+			clone.m_scope = this.m_scope;
+			return clone;
+		}
+
 		Scope m_scope;
 	}
 }
-

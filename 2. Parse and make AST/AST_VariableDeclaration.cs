@@ -32,5 +32,10 @@ namespace ProgrammingLanguageNr1
         {
                 return base.ToString() + " " + m_name + " of type " + m_type;
         }
+
+		public override AST Clone()
+		{
+			return (AST_VariableDeclaration)base.Clone();
+		}
     }
 }

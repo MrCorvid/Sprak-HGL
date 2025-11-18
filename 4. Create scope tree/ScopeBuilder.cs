@@ -38,6 +38,10 @@ namespace ProgrammingLanguageNr1
 		private void evaluateScopeDeclarations(AST tree) {
 			Debug.Assert(tree != null);
 			
+			// Note: The new GOTO and LABEL tokens do not declare scopes,
+            // so no changes are needed here. The logic correctly falls through
+            // to the final 'else if' and traverses into children where appropriate.
+			
 			if (tree.getTokenType() == Token.TokenType.FUNC_DECLARATION) 
 			{
                 evaluateFunctionScope(tree);
@@ -67,60 +71,37 @@ namespace ProgrammingLanguageNr1
 
         private void evaluateFunctionScope(AST tree)
         {
-            // Define function name
-			ReturnValueType returnType = ExternalFunctionCreator.GetReturnTypeFromString(tree.getChild(0).getTokenString());
+            ReturnValueType returnType = ExternalFunctionCreator.GetReturnTypeFromString(tree.getChild(0).getTokenString());
             string functionName = tree.getChild(1).getTokenString();
-
             Symbol functionScope = new FunctionSymbol(m_currentScope, functionName, returnType, tree);
-
-            m_globalScope.define(functionScope); // all functions are saved in the global scope
+            m_globalScope.define(functionScope);
             
 			m_currentScope = (Scope)functionScope;
             AST_FunctionDefinitionNode functionCallNode = (AST_FunctionDefinitionNode)(tree);
             functionCallNode.setScope((Scope)functionScope);
 
-            #if WRITE_DEBUG_INFO
-            Console.WriteLine("\nDefined function with name " + functionName + " and return type " + returnType);
-            #endif
-
-            // Process the body of the function
             evaluateScopeDeclarations(tree.getChild(3));
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = m_currentScope.getEnclosingScope();
         }
 
         private void evaluateIfScope(AST tree)
         {
             Scope subscope = new Scope(Scope.ScopeType.IF_SCOPE,"<IF-SUBSCOPE>", m_currentScope);
-
             m_currentScope = subscope;
-
             AST_IfNode ifNode = (tree as AST_IfNode);
             Debug.Assert(ifNode != null);
-
-			#if WRITE_DEBUG_INFO
-			Console.WriteLine("\nDefined IF-subscope for ifNode at line " + ifNode.getToken().LineNr);
-			#endif
-
-            ifNode.setScope(subscope); // save the new scope in the IF-token tree node
+            ifNode.setScope(subscope);
             
-            // Evaluate expression
             evaluateScopeDeclarationsInAllChildren(tree.getChild(0));
-
             AST trueNode = ifNode.getChild(1);
-            AST falseNode = null;
-            if (ifNode.getChildren().Count == 3)
-            {
-                falseNode = ifNode.getChild(2);
-            }
+            AST falseNode = (ifNode.getChildren().Count == 3) ? ifNode.getChild(2) : null;
 
 			evaluateScopeDeclarationsInAllChildren(trueNode);
             if (falseNode != null)
             {
                 evaluateScopeDeclarationsInAllChildren(falseNode);
             }
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = m_currentScope.getEnclosingScope();
         }
 
 		static int loopSubscopes = 0;
@@ -129,17 +110,11 @@ namespace ProgrammingLanguageNr1
         {
 			Scope subscope = new Scope(Scope.ScopeType.LOOP_SCOPE, "<LOOP-SUBSCOPE " + (loopSubscopes++) + ">", m_currentScope);
 			m_currentScope = subscope;
-
-#if WRITE_DEBUG_INFO
-            Console.WriteLine("\nDefined LOOP-subscope");
-#endif
-
             AST_LoopNode loopNode = (tree as AST_LoopNode);
             Debug.Assert(loopNode != null);
             evaluateScopeDeclarationsInAllChildren(loopNode);
 			loopNode.setScope(m_currentScope);
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = m_currentScope.getEnclosingScope();
         }
 
 		static int loopBlockSubscopes = 0;
@@ -148,23 +123,30 @@ namespace ProgrammingLanguageNr1
         {
 			Scope subscope = new Scope(Scope.ScopeType.LOOP_BLOCK_SCOPE, "<LOOP-BLOCK-SUBSCOPE " + (loopBlockSubscopes++) + ">", m_currentScope);
 			m_currentScope = subscope;
-
-#if WRITE_DEBUG_INFO
-            Console.WriteLine("\nDefined LOOP BLOCK-subscope");
-#endif
-
             AST_LoopBlockNode loopBlockNode = (tree as AST_LoopBlockNode);
             Debug.Assert(loopBlockNode != null);
             evaluateScopeDeclarationsInAllChildren(loopBlockNode);
 			loopBlockNode.setScope(m_currentScope);
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = m_currentScope.getEnclosingScope();
         }
 
 		private void evaluateReferences(AST tree) {
 			Debug.Assert(tree != null);
 			
-			if (tree.getTokenType() == Token.TokenType.VAR_DECLARATION) 
+			// START OF MODIFICATION: This is the critical change to fix the crash.
+            if (tree.getTokenType() == Token.TokenType.LABEL)
+            {
+                // A label is a declaration point, not a variable reference. It has no children
+                // that need to be resolved, so we do nothing and stop recursion for this branch.
+            }
+            else if (tree.getTokenType() == Token.TokenType.GOTO)
+            {
+                // A GOTO is a control flow instruction. Its child is the name of a label, NOT a variable.
+                // We must NOT traverse into its children, otherwise the builder will try to resolve
+                // the label name as a variable and fail. We stop recursion for this branch here.
+            }
+            // END OF MODIFICATION
+			else if (tree.getTokenType() == Token.TokenType.VAR_DECLARATION) 
 			{
                 evaluateReferencesForVAR_DECLARATION(tree);
 			}
@@ -225,126 +207,79 @@ namespace ProgrammingLanguageNr1
 		private void evaluateReferencesForASSIGNMENT(AST tree)
 		{
 			AST_Assignment assignment = tree as AST_Assignment;
-			
 			Symbol variableNameSymbol = m_currentScope.resolve(assignment.VariableName);
 			if(variableNameSymbol == null) {
 				m_errorHandler.errorOccured("Can't assign to undefined variable " + assignment.VariableName,
-				                Error.ErrorType.SYNTAX,
-				                tree.getToken().LineNr,
-				                tree.getToken().LinePosition);
+				                Error.ErrorType.SYNTAX, tree.getToken().LineNr, tree.getToken().LinePosition);
 			}
-			
 			evaluateReferencesInAllChildren(tree);
 		}
 		
 		private void evaluateReferencesForASSIGNMENT_TO_ARRAY(AST tree)
 		{
 			AST_Assignment assignment = tree as AST_Assignment;
-			
 			Symbol variableNameSymbol = m_currentScope.resolve(assignment.VariableName);
 			if(variableNameSymbol == null) {
 				m_errorHandler.errorOccured("Can't assign to undefined array " + assignment.VariableName,
-				                Error.ErrorType.SYNTAX,
-				                tree.getToken().LineNr,
-				                tree.getToken().LinePosition);
+				                Error.ErrorType.SYNTAX, tree.getToken().LineNr, tree.getToken().LinePosition);
 			}
-			
 			evaluateReferencesInAllChildren(tree);
 		}
 
 		private void evaluateReferencesForARRAY_LOOKUP(AST tree)
 		{
 			AST lookup = tree;
-			
 			Symbol variableNameSymbol = m_currentScope.resolve(lookup.getTokenString());
-
 			if(variableNameSymbol == null) {
 				m_errorHandler.errorOccured("Can't lookup in undefined array " + lookup.getTokenString(),
-				                            Error.ErrorType.SYNTAX,
-				                            lookup.getToken().LineNr,
-				                            lookup.getToken().LinePosition);
+				                            Error.ErrorType.SYNTAX, lookup.getToken().LineNr, lookup.getToken().LinePosition);
 			}
-			
 			evaluateReferencesInAllChildren(tree);
 		}
 
         private void evaluateReferencesForVAR_DECLARATION(AST tree)
         {
             AST_VariableDeclaration varDeclaration = tree as AST_VariableDeclaration;
-
-            ReturnValueType typeToDeclare = varDeclaration.Type;
-            string variableName = varDeclaration.Name;
-
-            if (m_currentScope.isDefined(variableName))
+            if (m_currentScope.isDefined(varDeclaration.Name))
             {
                 m_errorHandler.errorOccured(
-                    new Error("There is already a variable called '" + variableName + "'",
-                    Error.ErrorType.LOGIC,
-                    tree.getToken().LineNr,
-                    tree.getToken().LinePosition));
+                    new Error("There is already a variable called '" + varDeclaration.Name + "'",
+                    Error.ErrorType.LOGIC, tree.getToken().LineNr, tree.getToken().LinePosition));
             }
             else
             {
-                m_currentScope.define(new VariableSymbol(variableName, typeToDeclare));
-#if WRITE_DEBUG_INFO
-                Console.WriteLine("Defined variable with name " + variableName + " and type " + typeToDeclare + " (on line " + tree.getToken().LineNr + ")" + " in " + m_currentScope);
-#endif
+                m_currentScope.define(new VariableSymbol(varDeclaration.Name, varDeclaration.Type));
             }
         }
 
         private void evaluateReferencesForFUNCTION_CALL(AST tree)
         {
-            // Function name:
             string functionName = tree.getTokenString();
-
 			var sym = m_currentScope.resolve (functionName);
-
 			FunctionSymbol function = sym as FunctionSymbol;
-
             if (function == null)
             {
                 m_errorHandler.errorOccured("Can't find function with name " + functionName, 
-				                            Error.ErrorType.SCOPE,
-				                            tree.getToken().LineNr,
-				                            tree.getToken().LinePosition
-				                            );
+				                            Error.ErrorType.SCOPE, tree.getToken().LineNr, tree.getToken().LinePosition);
             }
             else
             {
-                #if WRITE_DEBUG_INFO
-                Console.WriteLine("Resolved function call with name " + functionName + " (on line " + tree.getToken().LineNr + ")");
-                #endif
-
-                // Parameters
                 evaluateReferencesInAllChildren(tree);
-
-                AST node = function.getFunctionDefinitionNode();
-                AST_FunctionDefinitionNode functionDefinitionTree = (AST_FunctionDefinitionNode)(node);
-				
-				/*if(functionDefinitionTree.getTokenString() != "<EXTERNAL_FUNC_DECLARATION>") {
-                	evaluateReferencesForFUNC_DECLARATION(functionDefinitionTree);
-				}*/
-
-                // Setup reference to Function Definition AST node
+                AST_FunctionDefinitionNode functionDefinitionTree = (AST_FunctionDefinitionNode)(function.getFunctionDefinitionNode());
                 AST_FunctionCall functionCallAst = tree as AST_FunctionCall;
                 Debug.Assert(functionCallAst != null);
 				functionCallAst.FunctionDefinitionRef = functionDefinitionTree;
 				
                 List<AST> calleeParameterList = functionDefinitionTree.getChild(2).getChildren();
-
-                // Check that the number of arguments is right
-                AST callerParameterList = tree.getChild(0);
-                List<AST> arguments = callerParameterList.getChildren();
-
+                List<AST> arguments = tree.getChild(0).getChildren();
                 if (arguments.Count != calleeParameterList.Count)
                 {
                     m_errorHandler.errorOccured(
-						"Wrong nr of arguments to  '" + functionDefinitionTree.getChild(1).getTokenString() + "' , expected " + calleeParameterList.Count + " but got " + arguments.Count
-                        , Error.ErrorType.SYNTAX, tree.getToken().LineNr, tree.getToken().LinePosition);
+						"Wrong nr of arguments to  '" + functionDefinitionTree.getChild(1).getTokenString() + "' , expected " + calleeParameterList.Count + " but got " + arguments.Count,
+                         Error.ErrorType.SYNTAX, tree.getToken().LineNr, tree.getToken().LinePosition);
                 }
             }
         }
-
 
         private void evaluateReferencesForIF(AST tree)
         {
@@ -356,80 +291,43 @@ namespace ProgrammingLanguageNr1
 
         private void evaluateReferencesForNAME(AST tree)
         {
-#if DEBUG
-			if (m_currentScope == null) {
-				throw new Exception ("m_currentScope is null");
-			}
-			if (tree == null) {
-				throw new Exception("tree is null");
-			}
-#endif
-
             Symbol symbol = m_currentScope.resolve(tree.getTokenString());
-			
 			if(symbol == null) {
 				m_errorHandler.errorOccured(
 					new  Error("Can't find variable or function '" + tree.getTokenString() + "' (forgot quotes?)", 
-				                                       Error.ErrorType.SYNTAX, 
-				                                       tree.getToken().LineNr, 
-				                                       tree.getToken().LinePosition));
+				                                       Error.ErrorType.SYNTAX, tree.getToken().LineNr, tree.getToken().LinePosition));
 			}
 			else if (symbol is FunctionSymbol) {
 				m_errorHandler.errorOccured(
 				                            new  Error("'" + tree.getTokenString() + "' is a function and must be called with ()", 
-				                                       Error.ErrorType.SYNTAX, 
-				                                       tree.getToken().LineNr, 
-				                                       tree.getToken().LinePosition));
+				                                       Error.ErrorType.SYNTAX, tree.getToken().LineNr, tree.getToken().LinePosition));
 			}
-
-            #if WRITE_DEBUG_INFO
-            Console.WriteLine("Resolved symbol with name " + tree.getTokenString() + " (on line " + tree.getToken().LineNr + ")" + " in " + m_currentScope);
-            #endif
-
             evaluateReferencesInAllChildren(tree);
         }
 
         private void evaluateReferencesForFUNC_DECLARATION(AST tree)
         {
             string functionName = tree.getChild(1).getTokenString();
-            m_currentScope = (Scope)m_currentScope.resolve(functionName); // push the scope with the function
-
-            #if WRITE_DEBUG_INFO
-            Console.WriteLine("\n Trying to resolve function parameters and body of " + functionName);
-            #endif
-
-            evaluateReferencesInAllChildren(tree.getChild(2)); // parameters
-            evaluateReferencesInAllChildren(tree.getChild(3)); // function body
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = (Scope)m_currentScope.resolve(functionName);
+            evaluateReferencesInAllChildren(tree.getChild(2));
+            evaluateReferencesInAllChildren(tree.getChild(3));
+            m_currentScope = m_currentScope.getEnclosingScope();
         }   
 		
 		private void evaluateReferencesForLOOP_BLOCK(AST tree)
         {
 			AST_LoopBlockNode loopBlockNode = tree as AST_LoopBlockNode;
             m_currentScope = loopBlockNode.getScope();
-
-            #if WRITE_DEBUG_INFO
-            Console.WriteLine("\n Trying to resolve body of loop block");
-            #endif
-
             evaluateReferencesInAllChildren(tree);
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = m_currentScope.getEnclosingScope();
         }  
 		
 		private void evaluateReferencesForLOOP(AST tree)
         {
 			AST_LoopNode loopBlockNode = tree as AST_LoopNode;
             m_currentScope = loopBlockNode.getScope();
-
-            #if WRITE_DEBUG_INFO
-            Console.WriteLine("\n Trying to resolve body of loop");
-            #endif
-
             evaluateReferencesInAllChildren(tree);
-
-            m_currentScope = m_currentScope.getEnclosingScope(); // pop scope
+            m_currentScope = m_currentScope.getEnclosingScope();
         }
 		
 		public Scope getGlobalScope() {
@@ -443,4 +341,3 @@ namespace ProgrammingLanguageNr1
 		ErrorHandler m_errorHandler;
 	}
 }
-

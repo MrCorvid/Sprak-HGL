@@ -49,6 +49,12 @@ namespace ProgrammingLanguageNr1
             COMMENT,
 			FROM,
 			TO,
+            
+            // START ADDED TOKENS
+            GOTO,
+            LABEL,
+			IF_GOTO,
+            // END ADDED TOKENS
 
 			NOT,
 
@@ -137,4 +143,3 @@ namespace ProgrammingLanguageNr1
 		private object m_value;
 	}
 }
-

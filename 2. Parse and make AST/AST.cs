@@ -173,10 +173,23 @@ namespace ProgrammingLanguageNr1
 				}
 			}
 		}
+
+		public virtual AST Clone()
+		{
+			AST clone = (AST)this.MemberwiseClone();
+			if (m_children != null)
+			{
+				clone.m_children = new List<AST>();
+				foreach (var child in m_children)
+				{
+					clone.m_children.Add(child.Clone());
+				}
+			}
+			return clone;
+		}
 		
 		Token m_token;
 		List<AST> m_children;
 		int m_executions;
 	}
 }
-

@@ -22,8 +22,14 @@ namespace ProgrammingLanguageNr1
 		//public void setForeachArray(object foreachArray) { m_foreachArray = foreachArray; }
 		//public object getForeachArray() { return m_foreachArray; }			
 		
+		public override AST Clone()
+		{
+			var clone = (AST_LoopNode)base.Clone();
+			clone.m_scope = this.m_scope;
+			return clone;
+		}
+
 		Scope m_scope;
 		//object m_foreachArray;
 	}
 }
-
